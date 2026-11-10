@@ -56,6 +56,10 @@
   })();
   </script>
 
+  <!-- Firebase (compat) para registrar la solicitud en la Central STEN -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -578,7 +582,21 @@
     /* ================= CONFIGURACIÓN =================
        1) Número de cabina STEN (opcional). Formato internacional sin "+" ni espacios.
           Ejemplo: '528991234567'. Vacío = WhatsApp pide elegir el contacto.            */
-    var WHATSAPP_NUMERO = '';
+    var WHATSAPP_NUMERO = '528991227489';
+
+    /* Central STEN: liga de solicitud de Corning (plataforma STEN > Configuración >
+       Ligas de solicitud para hospitales, código CORNING). Pegue la clave "k" de la
+       liga. También se acepta ?k=CLAVE en la URL del portal (tiene prioridad).     */
+    var STEN_CLAVE = 'htYdxMhXoCtFAUBi1MZynWPP';
+    var STEN_ORIGEN_CODIGO = 'CORNING';
+    var STEN_FIREBASE = {
+      apiKey: 'AIzaSyC6Yp_JhH0y6pc1KSoCDUK32kV3aXY_bo0',
+      authDomain: 'sten-ambulanciass.firebaseapp.com',
+      projectId: 'sten-ambulanciass',
+      storageBucket: 'sten-ambulanciass.firebasestorage.app',
+      messagingSenderId: '352373862830',
+      appId: '1:352373862830:web:29057a3e77a9dc8a89d83f'
+    };
 
     /* Teléfono de Coordinación STEN 24/7 (se muestra en el aviso y en paciente inconsciente) */
     var TEL_COORDINACION = '8991227489';
@@ -1126,6 +1144,114 @@
       if (pendientes.length) pendientes.forEach(function (r) { subir(r).catch(function () {}); });
     }
 
+    /* ---------- CENTRAL STEN (solicitudesServicio, sin sesión) ----------
+       Las reglas de Firestore de STEN solo aceptan solicitudes sin sesión con una
+       clave de liga activa (portalesHospital/{clave}) y exactamente estos campos;
+       un campo extra o con otro nombre hace que la escritura se rechace.        */
+    var STEN_COLA_KEY = 'corning_sten_pendientes';
+
+    function stenClave() {
+      var k = (new URLSearchParams(window.location.search).get('k') || '').trim();
+      if (k) return k;
+      return /^[A-Za-z0-9_-]{20,64}$/.test(STEN_CLAVE) ? STEN_CLAVE : '';
+    }
+
+    var stenDb = null;
+    function stenFirestore() {
+      if (stenDb) return stenDb;
+      if (!window.firebase || !firebase.firestore) return null;
+      var app = firebase.apps.filter(function (a) { return a.name === 'sten'; })[0] ||
+                firebase.initializeApp(STEN_FIREBASE, 'sten');
+      stenDb = app.firestore();
+      return stenDb;
+    }
+
+    /* Prioridad del botón activo: Urgencia = Rojo; traslado inmediato = Amarillo;
+       traslado programado y eventos = Verde. Paciente inconsciente siempre Rojo. */
+    function stenPrioridad() {
+      if (state.modulo === 'urgencia' || state.conciencia === 'INCONSCIENTE') return 'ROJO';
+      if (state.modulo === 'traslado' && state.traslado === 'hoy') return 'AMARILLO';
+      return 'VERDE';
+    }
+
+    function stenSolicitud(reg, mensaje) {
+      var m = state.modulo, p = reg.paciente || {};
+      var prog = m === 'traslado' && state.traslado === 'programado';
+      var fecha = m === 'evento' ? val('eFecha') : prog ? val('tFecha') : '';
+      var hora = m === 'evento' ? val('eHora') : prog ? val('tHora') : '';
+      return {
+        folio: reg.folio,
+        folio_sten: reg.folio,   /* el folio oficial STEN lo asigna Coordinación al despachar */
+        numero_frap: reg.folio,
+        canal_origen: 'LINK_HOSPITAL',
+        estatus: 'Solicitado',
+        estado: 'pendiente',
+        origen: 'Corning ' + reg.sede_corning,
+        origen_codigo: STEN_ORIGEN_CODIGO,
+        clave_acceso: stenClave(),
+        prioridadDespacho: stenPrioridad(),
+        unidad_negocio: STEN_ORIGEN_CODIGO,
+        datos_paciente: {
+          nombre: m === 'evento' ? ('Cobertura de ' + (state.eventoTipo === 'EVENTO' ? 'evento' : 'simulacro')) : (p.nombre || ''),
+          edad: p.edad === null || p.edad === undefined ? '' : String(p.edad),
+          peso: p.peso_kg === null || p.peso_kg === undefined ? '' : String(p.peso_kg),
+          diagnostico: m === 'evento' ? ('Cobertura ' + val('eHoras') + ' h · Responsables: ' + val('eResp')) : (p.diagnostico || ''),
+          habitacion: 'Planta ' + reg.sede_corning + ' · ' + reg.ubicacion_interna_px,
+          estado: p.conciencia || '',
+          critico: state.conciencia === 'INCONSCIENTE',
+          enfermedades_cronicas: (p.enfermedades_cronicas || []).join(', '),
+          gps: reg.gps_link || reg.ubicacion_manual || ''
+        },
+        clasificacion: m === 'urgencia' ? 'Urgencia' : m === 'traslado' ? 'Traslado' : 'Evento',
+        destino: reg.destino_traslado || '',
+        programacion: reg.programado_para ? 'Programado ' + reg.programado_para : (m === 'urgencia' ? 'Urgencia inmediata' : 'Inmediato / Paciente Listo'),
+        programacion_tipo: (prog || m === 'evento') ? 'Programado' : 'Hoy',
+        fecha_programada: fecha,
+        hora_programada: hora,
+        solicitante_nombre: reg.quien_solicita.nombre,
+        solicitante_area: reg.quien_solicita.departamento,
+        solicitante_tel: reg.quien_solicita.telefono,
+        indicaciones: reg.cobertura,
+        mensaje: String(mensaje || '').slice(0, 12000),
+        fecha_creacion: firebase.firestore.FieldValue.serverTimestamp()
+      };
+    }
+
+    function stenLeerCola() { try { return JSON.parse(localStorage.getItem(STEN_COLA_KEY) || '[]'); } catch (e) { return []; } }
+    function stenEscribirCola(c) { try { localStorage.setItem(STEN_COLA_KEY, JSON.stringify(c)); } catch (e) {} }
+    function stenQuitar(folio) { stenEscribirCola(stenLeerCola().filter(function (x) { return x.folio !== folio; })); }
+
+    /* El folio es el id del documento: un reintento nunca duplica la solicitud. La
+       cola guarda la solicitud sin el serverTimestamp (no se puede serializar).  */
+    function stenSubir(datos) {
+      var db = stenFirestore();
+      if (!db) return Promise.reject(new Error('firebase-no-disponible'));
+      var doc = Object.assign({}, datos, { fecha_creacion: firebase.firestore.FieldValue.serverTimestamp() });
+      return db.collection('solicitudesServicio').doc(datos.folio).set(doc).then(function () { stenQuitar(datos.folio); }, function (e) {
+        /* permission-denied: clave inválida o el documento ya existía (ya se registró) */
+        if (e && e.code === 'permission-denied') stenQuitar(datos.folio);
+        throw e;
+      });
+    }
+
+    function registrarSten(reg, mensaje) {
+      if (!stenClave()) {
+        console.warn('[Portal Corning] Falta la clave de la liga STEN: la solicitud solo se envía por WhatsApp.');
+        return Promise.resolve('sin-clave');
+      }
+      var datos = stenSolicitud(reg, mensaje);
+      var cola = stenLeerCola().filter(function (x) { return x.folio !== datos.folio; });
+      var copia = Object.assign({}, datos); delete copia.fecha_creacion;
+      cola.push(copia); stenEscribirCola(cola);
+      return conTiempo(stenSubir(datos), 10000).then(function () { return 'ok'; }, function (e) {
+        console.error('[Portal Corning] No se pudo registrar en la Central STEN:', e);
+        return e && e.code === 'permission-denied' ? 'rechazado' : 'pendiente';
+      });
+    }
+
+    /* Reintenta solicitudes que no llegaron a la Central en visitas anteriores */
+    if (stenClave()) stenLeerCola().forEach(function (x) { stenSubir(x).catch(function () {}); });
+
     /* ---------- MODAL ---------- */
     var ultimoFoco = null;
 
@@ -1201,6 +1327,8 @@
       reg.mensaje_editado = state.mensaje !== reg.mensaje_original;
       reg.mensaje_whatsapp = state.mensaje;
       var promesaRegistro = registrar(reg);
+      /* 1b) Registro en la Central STEN (tarjeta "Solicitudes Entrantes"), asíncrono */
+      var promesaSten = registrarSten(reg, state.mensaje);
 
       /* 2) Apertura inmediata de WhatsApp */
       var url = 'https://api.whatsapp.com/send?' +
@@ -1221,6 +1349,13 @@
       promesaRegistro.then(function (r) {
         if (r === 'ok') est.textContent = 'Registro guardado en sistema. Folio ' + reg.folio;
         else if (r === 'pendiente') est.textContent = 'Sin conexión con el sistema: el registro se sincronizará automáticamente. Folio ' + reg.folio;
+      });
+      promesaSten.then(function (r) {
+        if (r === 'sin-clave') return;
+        est.classList.remove('hidden');
+        est.textContent = r === 'ok' ? 'Solicitud recibida por Central Despacho STEN. Folio ' + reg.folio
+          : r === 'pendiente' ? 'Sin conexión con la Central STEN: se reintentará automáticamente. Folio ' + reg.folio
+          : 'La Central STEN no aceptó el registro: confirme por WhatsApp o al ' + TEL_COORDINACION_TEXTO + '. Folio ' + reg.folio;
       });
     });
 
