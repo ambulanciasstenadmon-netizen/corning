@@ -82,10 +82,6 @@
           <span class="font-medium text-[#64748B]">OPERADO POR </span><span class="font-bold text-[#0F172A]">RouteIQ SALUD</span>
         </span>
       </div>
-      <span class="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-corning/20 bg-corning-light px-3 py-1 text-xs font-semibold text-corning">
-        <span class="h-1.5 w-1.5 rounded-full bg-corning" aria-hidden="true"></span>
-        Zona Protegida
-      </span>
     </div>
   </header>
 
@@ -102,8 +98,7 @@
 
   <section class="bg-corning text-white">
     <div class="mx-auto max-w-4xl px-4 py-7 sm:px-6 sm:py-9">
-      <p class="text-xs font-semibold uppercase tracking-[0.2em] text-white/70">Contrato corporativo</p>
-      <h1 class="mt-2 text-xl font-bold tracking-tight sm:text-2xl">PORTAL DE GESTIÓN MÉDICA INDUSTRIAL - ZONA PROTEGIDA</h1>
+      <h1 class="text-xl font-bold tracking-tight sm:text-2xl">SOLICITUD DE SERVICIO MÉDICO Y TRASLADOS CORPORATIVOS</h1>
       <p class="mt-2 max-w-2xl text-sm text-white/80 sm:text-base">Sistema de despacho inmediato y programación de traslados corporativos</p>
     </div>
   </section>
@@ -483,20 +478,6 @@
         </div>
       </section>
 
-      <!-- PÓLIZA -->
-      <section class="card overflow-hidden">
-        <div class="flex items-stretch">
-          <div class="w-1.5 shrink-0 bg-corning" aria-hidden="true"></div>
-          <div class="flex flex-1 flex-col gap-1 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-            <div>
-              <p class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Régimen de facturación</p>
-              <p class="mt-1 text-sm font-semibold text-slate-900">MODALIDAD: Zona Protegida Corning - Facturación directa a póliza corporativa</p>
-            </div>
-            <span class="mt-2 inline-flex w-fit items-center rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-xs font-medium text-slate-600 sm:mt-0">No editable</span>
-          </div>
-        </div>
-      </section>
-
       <!-- ENVÍO -->
       <div class="flex flex-col-reverse gap-3 border-t border-slate-200 pt-6 sm:flex-row sm:items-center sm:justify-between">
         <p class="text-xs text-slate-500">Los campos marcados con * son obligatorios.</p>
@@ -528,7 +509,7 @@
   <footer class="border-t border-slate-200 bg-white">
     <div class="mx-auto flex max-w-4xl flex-col gap-1 px-4 py-5 text-xs text-slate-500 sm:flex-row sm:justify-between sm:px-6">
       <p>Operado por RouteIQ SALUD - Ambulancias STEN</p>
-      <p>Uso exclusivo de personal autorizado Corning - Zona Protegida</p>
+      <p>Uso exclusivo de personal autorizado Corning</p>
     </div>
   </footer>
 
@@ -589,6 +570,10 @@
        liga. También se acepta ?k=CLAVE en la URL del portal (tiene prioridad).     */
     var STEN_CLAVE = 'htYdxMhXoCtFAUBi1MZynWPP';
     var STEN_ORIGEN_CODIGO = 'CORNING';
+    /* Etiqueta interna para Coordinación STEN (por cuenta de CYMA - HLF). Solo
+       viaja en el documento de Firestore: nunca se muestra en la pantalla ni
+       en el mensaje que copia el solicitante. */
+    var CONVENIO_INTERNO = { origenConvenio: 'CYMA (HLF)', institucionFacturacion: 'CYMA - HLF' };
     var STEN_FIREBASE = {
       apiKey: 'AIzaSyC6Yp_JhH0y6pc1KSoCDUK32kV3aXY_bo0',
       authDomain: 'sten-ambulanciass.firebaseapp.com',
@@ -1002,7 +987,7 @@
       /* ----- Mensaje ----- */
       var L = [
         LINEA,
-        'SOLICITUD DE SERVICIO - CORNING ZONA PROTEGIDA',
+        'SOLICITUD DE SERVICIO - CORNING',
         'OPERADO POR ROUTEIQ SALUD',
         LINEA,
         'SEDE: CORNING ' + state.sede,
@@ -1039,9 +1024,6 @@
         '- Reporta: ' + val('sNombre'),
         '- Departamento: ' + departamento(),
         '- Telefono / Ext: ' + val('sTel'),
-        '',
-        'FACTURACION:',
-        '- Cobertura: Zona Protegida Corning (Contrato Corporativo)',
         '',
         'CONTROL STEN:',
         '- Unidad asignada: [ Pendiente por Coordinacion ]',
@@ -1085,7 +1067,8 @@
           departamento_categoria: val('sDepto'),
           telefono: val('sTel')
         },
-        cobertura: 'Zona Protegida Corning (Contrato Corporativo)',
+        origenConvenio: CONVENIO_INTERNO.origenConvenio,
+        institucionFacturacion: CONVENIO_INTERNO.institucionFacturacion,
         mensaje_whatsapp: mensaje,
         origen: 'portal-corning',
         status: 'NUEVO_REQUERIMIENTO'
@@ -1196,13 +1179,16 @@
           edad: p.edad === null || p.edad === undefined ? '' : String(p.edad),
           peso: p.peso_kg === null || p.peso_kg === undefined ? '' : String(p.peso_kg),
           diagnostico: m === 'evento' ? ('Cobertura ' + val('eHoras') + ' h · Responsables: ' + val('eResp')) : (p.diagnostico || ''),
-          habitacion: 'Planta ' + reg.sede_corning + ' · ' + reg.ubicacion_interna_px,
+          habitacion: ('Planta ' + reg.sede_corning + ' · ' + reg.ubicacion_interna_px).slice(0, 40),
           estado: p.conciencia || '',
           critico: state.conciencia === 'INCONSCIENTE',
-          enfermedades_cronicas: (p.enfermedades_cronicas || []).join(', '),
-          gps: reg.gps_link || reg.ubicacion_manual || ''
+          cronicas: (p.enfermedades_cronicas || []).slice(0, 40)
         },
         clasificacion: m === 'urgencia' ? 'Urgencia' : m === 'traslado' ? 'Traslado' : 'Evento',
+        tipo_medico: state.equipo === 'si' ? 'Requiere soporte especial' : 'Por confirmar con Coordinación',
+        pago: 'Convenio ' + CONVENIO_INTERNO.origenConvenio,
+        origenConvenio: CONVENIO_INTERNO.origenConvenio,
+        institucionFacturacion: CONVENIO_INTERNO.institucionFacturacion,
         destino: reg.destino_traslado || '',
         programacion: reg.programado_para ? 'Programado ' + reg.programado_para : (m === 'urgencia' ? 'Urgencia inmediata' : 'Inmediato / Paciente Listo'),
         programacion_tipo: (prog || m === 'evento') ? 'Programado' : 'Hoy',
@@ -1211,7 +1197,7 @@
         solicitante_nombre: reg.quien_solicita.nombre,
         solicitante_area: reg.quien_solicita.departamento,
         solicitante_tel: reg.quien_solicita.telefono,
-        indicaciones: reg.cobertura,
+        indicaciones: ('Ubicación: ' + (reg.ubicacion_interna_px || '') + (reg.gps_link || reg.ubicacion_manual ? ' · ' + (reg.gps_link || reg.ubicacion_manual) : '')).slice(0, 6000),
         mensaje: String(mensaje || '').slice(0, 12000),
         fecha_creacion: firebase.firestore.FieldValue.serverTimestamp()
       };
